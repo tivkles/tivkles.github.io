@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A Picnic under the stars</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #111;
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+
+        #gameCanvas {
+            /* Gradient for distinct sky/grass */
+            background: linear-gradient(to bottom,
+                #000000 0%, /* Black sky start */
+                #000000 50%, /* Black sky end at 50% */
+                #004000 50%, /* Dark green grass start at 50% */
+                #006400 100% /* Lighter green grass end */
+            );
+            border: 4px solid #3b82f6; /* Tailwind's blue-500 */
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.5); /* blue-500 */
+            border-radius: 16px; /* Rounded corners */
+            display: block; /* Important for scaling */
+            width: 100%; /* Canvas takes full width of its container */
+            height: 100%; /* Canvas takes full height of its container */
+            max-width: 1000px;
+            max-height: 750px;
+            cursor: none; /* Hide cursor over canvas */
+            position: relative;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .game-button {
+            padding: 8px 16px;
+            border-radius: 8px;
+            background-color: #3b82f6;
+            color: white;
+            font-family: 'Press Start 2P', cursive;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            font-size: 0.7em;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+
+        .game-button:hover {
+            background-color: #2563eb;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .game-button:active {
+            background-color: #1e40af;
+            transform: translateY(0);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+        }
+
+        #message {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: 'Press Start 2P', cursive;
+            z-index: 10;
+            font-size: 0.8em;
+            border: 2px solid #3b82f6;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+            pointer-events: none;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        /* Overlay for Game Over / Win */
+        .end-game-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 11;
+        }
+
+        .end-game-content {
+            text-align: center;
+            padding: 20px;
+            border-radius: 8px;
+            background-color: #111;
+        }
+
+        .end-game-content.game-over { border: 4px solid #dc2626; }
+         .end-game-content.win { border: 4px solid #facc15; }
+
+        .end-game-title { font-size: 1.5em; margin-bottom: 10px; }
+         .end-game-title.game-over { color: #f87171; }
+         .end-game-title.win { color: #fde047; }
+
+        .end-game-score { font-size: 1.2em; color: white; margin-bottom: 15px; }
+
+    </style>
+</head>
+<body>
+    <div style="position: relative;">
+        <canvas id="gameCanvas"></canvas>
+        </div>
+    <div id="controls">
+        <button id="startButton" class="game-button">Start</button>
+        <button id="pauseButton" class="game-button hidden">Pause</button>
+        <button id="muteButton" class="game-button">
+          <span id="muteIcon">🔊</span>
+        </button>
+    </div>
+    <div id="message" class="hidden"></div>
+    <div id="endGameOverlay" class="end-game-overlay hidden">
+        <div id="endGameContent" class="end-game-content">
+            <h2 id="endGameTitle" class="end-game-title">Game Over</h2>
+            <p class="end-game-score">Final Score: <span id="finalScore">0</span></p>
+            <button id="restartButton" class="game-button">Restart</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Get references to HTML elements
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const pauseButton = document.getElementById('pauseButton');
+        const muteButton = document.getElementById('muteButton');
+        const muteIcon = document.getElementById('muteIcon');
+        const messageElement = document.getElementById('message');
+        const endGameOverlay = document.getElementById('endGameOverlay');
+        const endGameContent = document.getElementById('endGameContent');
+        const endGameTitle = document.getElementById('endGameTitle');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const restartButton = document.getElementById('restartButton');
+
+        // Set canvas dimensions
+        canvas.width = 1000;
+        canvas.height = 750;
+
+        // --- Constants ---
+        const GROUND_LEVEL_START_Y = canvas.height * 0.5;
+        const GROUND_LEVEL_END_Y = canvas.height;
+        const MIN_SCALE = 0.4; const MAX_SCALE = 1.0; const GROUND_RANGE = GROUND_LEVEL_END_Y - GROUND_LEVEL_START_Y;
+        const COW_BASE_FONT_SIZE = 70;
+        const FARMER_BASE_FONT_SIZE = 70;
+        const UFO_BASE_FONT_SIZE = FARMER_BASE_FONT_SIZE * 1.75;
+        const MOTHERSHIP_BASE_FONT_SIZE = 80;
+        const FARMER_BASE_SPEED_X = 1.5; const COW_SPEED_MULTIPLIER = 1.5; const COW_BASE_SPEED = FARMER_BASE_SPEED_X * COW_SPEED_MULTIPLIER; const COW_CHANGE_DIR_PROB = 0.01;
+        const EXPLOSION_DURATION = 40; const BARN_WIDTH = 125; const BARN_HEIGHT = 112;
+        const BULLET_BASE_FONT_SIZE = 24;
+        const NUKE_BULLET_FONT_SIZE = BULLET_BASE_FONT_SIZE * 2.5;
+        const COW_MOO_INTERVAL = 2000;
+        const COW_MOO_RANDOMNESS = 1000;
+        const WIN_SCORE_MULTIPLIER = 5;
+        const STAR_COUNT = 150;
+        const TREE_COUNT = 20;
+        const INITIAL_BARN_COUNT = 4;
+        const INITIAL_FARMER_COUNT = 3;
+        const CLOAK_DURATION = 2000;
+        const CLOAK_COOLDOWN = 8000;
+        const UI_FONT = '16px "Press Start 2P"';
+        const UI_COLOR = '#FFFFFF';
+        const UI_SHADOW_COLOR = '#3b82f6';
+        const UI_PADDING = 10;
+        const UI_LINE_HEIGHT = 25;
+        const HEALTH_BAR_WIDTH = 200;
+        const HEALTH_BAR_HEIGHT = 16;
+        const GAME_TITLE = "A Picnic under the stars"; // NEW: Game Title
+        const TITLE_FONT = '48px "Press Start 2P"'; // NEW: Title Font
+        const SUBTITLE_FONT = '20px "Press Start 2P"'; // NEW: Subtitle Font
+        const RAINBOW_COLORS = ['#FF0000', '#FF7F00', '#FFFF00', '#00FF00', '#0000FF', '#4B0082', '#8B00FF']; // NEW: Rainbow
+
+        const WEAPON = { BAZOOKA: 'bazooka', MACHINE_GUN: 'machine_gun', MISSILE: 'missile', NUKE: 'nuke' };
+        const NUKE_DAMAGE = 40; const NUKE_COOLDOWN = 15000; const MISSILE_DAMAGE = 25; const MACHINE_GUN_DAMAGE = 5; const BAZOOKA_DAMAGE = 10;
+        const NUKE_SPEED = 2.5;
+        const NUKE_HOMING_RATE = 0.03;
+
+        // Declare game state variables
+        let ufo; let mothership; let barns = []; let cows = []; let farmers = []; let bullets = [];
+        let stars = []; let trees = [];
+        let score = 0; let gameRunning = false; let animationId; let zapReady = true; let zapTimeoutId; let farmerIntervalId;
+        let difficultyLevel = 1; let gameSpeed = 1; let isMuted = false; let health = 100;
+        let gameOver = false; let gameWon = false; let initialCowCount = 0; let abductedCowCount = 0;
+        let keys = {}; let zapVisual = null; let gameObjects = []; let messageTimeoutId = null; let explosionEffect = null;
+        let totalFarmersSpawned = 0;
+        let isCloaked = false;
+        let cloakReady = true;
+        let cloakDurationTimer = null;
+        let cloakCooldownTimer = null;
+
+        // --- Sound Effects (Tone.js) ---
+        const synth = new Tone.Synth().toDestination();
+        const woodSynth = new Tone.MembraneSynth({ pitchDecay: 0.01, octaves: 2, oscillator: { type: "square" }, envelope: { attack: 0.001, decay: 0.2, sustain: 0.01, release: 0.1 } }).toDestination();
+        const winSynth = new Tone.PolySynth(Tone.Synth, { oscillator : { type : "triangle" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.5 } }).toDestination();
+        const explosionSynth = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.005, decay: 0.1, sustain: 0 } }).toDestination();
+        const machineGunSynth = new Tone.NoiseSynth({ noise: { type: "pink" }, envelope: { attack: 0.001, decay: 0.01, sustain: 0 } }).toDestination();
+        const missileSynth = new Tone.Synth({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.1, decay: 0.3, sustain: 0.1, release: 0.5 } }).toDestination();
+        const nukeLaunchSynth = new Tone.Synth({ oscillator: { type: "sine" }, frequency: "C1", envelope: { attack: 1, decay: 1, sustain: 0.5, release: 2 } }).toDestination();
+        const nukeImpactSound = explosionSynth;
+        const mooSynth = new Tone.Synth({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.1, decay: 0.2, sustain: 0.1, release: 0.3 } }).toDestination();
+        const cloakSynth = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.2, decay: 0.1, sustain: 0.1, release: 0.2 }, volume: -10 }).toDestination();
+
+        function playSound(type) { /* ... (no changes) ... */
+             try { if (isMuted) return; const now = Tone.now(); switch (type) { case 'zap': synth.triggerAttackRelease("E5", "16n", now); break; case 'abduct': synth.triggerAttackRelease("A4", "8n", now); break; case 'hit': synth.triggerAttackRelease("C3", "8n", now); break; case 'gameOver': explosionSynth.triggerAttackRelease("8n", now); synth.triggerAttackRelease("C1", "1n", now + 0.05); break; case 'cowDeath': synth.triggerAttackRelease("C2", "16n", now); break; case 'win': winSynth.triggerAttackRelease(["C4", "E4", "G4", "C5"], "8n", now); winSynth.triggerAttackRelease(["E4", "G4", "C5", "E5"], "8n", now + 0.2); winSynth.triggerAttackRelease(["G4", "C5", "E5", "G5"], "4n", now + 0.4); break; case 'barnBreak': woodSynth.triggerAttackRelease("C2", "8n", now); break; case 'shoot_machine_gun': machineGunSynth.triggerAttackRelease("32n", now); break; case 'shoot_missile': missileSynth.triggerAttackRelease("A2", "4n", now); break; case 'shoot_nuke': nukeLaunchSynth.triggerAttackRelease("2n", now); break; case 'nuke_impact': nukeImpactSound.triggerAttackRelease("4n", now); break; case 'shoot_bazooka': synth.triggerAttackRelease("G2", "8n", now); break; case 'moo': mooSynth.triggerAttackRelease("G3", "4n", now); break; case 'cloak_on': cloakSynth.triggerAttackRelease("C5", "8n", now); break; } } catch (error) { console.error("Tone.js sound error:", error); }
+        }
+
+        // --- Helper Functions ---
+        function showMessage(text, duration = 3000) { /* ... (no changes) ... */
+            try { if (messageTimeoutId) { clearTimeout(messageTimeoutId); } messageElement.textContent = text; messageElement.classList.remove('hidden'); messageTimeoutId = setTimeout(() => { messageElement.classList.add('hidden'); messageTimeoutId = null; }, duration); } catch (error) { console.error("Error in showMessage:", error); }
+         }
+        function getScale(y) { /* ... (no changes) ... */
+             if (y < GROUND_LEVEL_START_Y) return MIN_SCALE; if (y > GROUND_LEVEL_END_Y) return MAX_SCALE; const factor = (y - GROUND_LEVEL_START_Y) / GROUND_RANGE; return MIN_SCALE + (MAX_SCALE - MIN_SCALE) * factor;
+         }
+        function getScaledRect(obj) { /* ... (no changes) ... */
+             if (obj.type === 'ufo' || obj.type === 'mothership' || obj.type === 'bullet') { return { x: obj.x, y: obj.y, width: obj.width, height: obj.height }; } const scale = getScale(obj.y); let scaledWidth, scaledHeight; let baseSize; if (obj.type === 'cow') { baseSize = COW_BASE_FONT_SIZE; scaledWidth = baseSize * scale * 0.8; scaledHeight = baseSize * scale * 0.7; } else if (obj.type === 'farmer') { baseSize = FARMER_BASE_FONT_SIZE; scaledWidth = baseSize * scale * 0.7; scaledHeight = baseSize * scale * 0.8; } else if (obj.type === 'barn') { scaledWidth = obj.width * scale; scaledHeight = obj.height * scale; } else { scaledWidth = obj.width ? obj.width * scale : 10 * scale; scaledHeight = obj.height ? obj.height * scale : 10 * scale; } return { x: obj.x - scaledWidth / 2 + obj.width / 2, y: obj.y - scaledHeight / 2 + obj.height / 2, width: scaledWidth, height: scaledHeight };
+         }
+        function checkCollision(rect1, rect2) { /* ... (no changes) ... */
+              if (!rect1 || !rect2 || typeof rect1.x === 'undefined' || typeof rect2.x === 'undefined' || typeof rect1.width === 'undefined' || typeof rect2.width === 'undefined') { return false; } return rect1.x < rect2.x + rect2.width && rect1.x + rect1.width > rect2.x && rect1.y < rect2.y + rect2.height && rect1.y + rect1.height > rect2.y;
+         }
+        function approachAngle(currentAngle, targetAngle, maxChange) { /* ... (no changes) ... */
+              let difference = (targetAngle - currentAngle + Math.PI * 3) % (Math.PI * 2) - Math.PI; const change = Math.max(-maxChange, Math.min(maxChange, difference)); let newAngle = (currentAngle + change + Math.PI * 2) % (Math.PI * 2); return newAngle;
+        }
+
+
+        // --- Game Object Creation ---
+        function createUfo() { /* ... (no changes) ... */
+            const approxWidth = UFO_BASE_FONT_SIZE * 0.8; const approxHeight = UFO_BASE_FONT_SIZE * 0.6;
+            return { x: canvas.width / 2 - approxWidth / 2, y: 50, width: approxWidth, height: approxHeight, speed: 5, health: 100, type: 'ufo' };
+        }
+        function createCow(x, y) { /* ... (no changes) ... */
+            const initialAngle = Math.random() * Math.PI * 2; const initialSpeed = COW_BASE_SPEED * gameSpeed; const logicalSize = COW_BASE_FONT_SIZE * 0.5; return { x: x, y: y, width: logicalSize, height: logicalSize, vx: Math.cos(initialAngle) * initialSpeed, vy: Math.sin(initialAngle) * initialSpeed, lastMooTime: Date.now() - Math.random() * COW_MOO_INTERVAL, dead: false, abducted: false, type: 'cow' };
+        }
+        function determineWeapon(count) { const weaponIndex = count % 4; switch (weaponIndex) { case 0: return WEAPON.BAZOOKA; case 1: return WEAPON.MACHINE_GUN; case 2: return WEAPON.MISSILE; case 3: return WEAPON.NUKE; default: return WEAPON.BAZOOKA; } }
+        function createFarmer(x, y) { /* ... (no changes) ... */
+            totalFarmersSpawned++; const weaponType = determineWeapon(totalFarmersSpawned); const gender = (totalFarmersSpawned % 2 === 0) ? 'woman' : 'man'; const logicalSize = FARMER_BASE_FONT_SIZE * 0.5; return { x: x, y: y, width: logicalSize, height: logicalSize, weaponType: weaponType, gender: gender, aim: Math.random() * Math.PI * 2, type: 'farmer', lastNukeTime: 0 };
+        }
+        function createBullet(x, y, angle, weaponType) { /* ... (no changes) ... */
+            let props = { speed: 3, damage: BAZOOKA_DAMAGE, radius: 6, isHoming: false }; switch (weaponType) { case WEAPON.MACHINE_GUN: props = { speed: 5, damage: MACHINE_GUN_DAMAGE, radius: 5, isHoming: false }; break; case WEAPON.MISSILE: props = { speed: 2, damage: MISSILE_DAMAGE, radius: 8, isHoming: false }; break; case WEAPON.NUKE: props = { speed: NUKE_SPEED, damage: NUKE_DAMAGE, radius: NUKE_BULLET_FONT_SIZE * 0.5, isHoming: true }; break; } return { x: x, y: y, angle: angle, weaponType: weaponType, isFarmer: true, type: 'bullet', ...props };
+         }
+        function createMothership() { /* ... (no changes) ... */
+             const approxSize = MOTHERSHIP_BASE_FONT_SIZE * 0.8; const padding = 20; const randomX = Math.random() * (canvas.width - approxSize - padding * 2) + padding; const randomY = Math.random() * (GROUND_LEVEL_START_Y - approxSize - padding * 2) + padding; return { x: randomX, y: randomY, width: approxSize, height: approxSize, type: 'mothership' };
+         }
+        function createBarn(x, y) { const hiddenCow = createCow(x, y); return { x: x, y: y, width: BARN_WIDTH, height: BARN_HEIGHT, isOpen: false, hiddenCow: hiddenCow, type: 'barn' }; }
+
+        function initStars() { /* ... (no changes) ... */
+            stars = []; for (let i = 0; i < STAR_COUNT; i++) { stars.push({ x: Math.random() * canvas.width, y: Math.random() * GROUND_LEVEL_START_Y, radius: Math.random() * 1.5 + 0.5 }); }
+        }
+        function initTrees() { /* ... (no changes) ... */
+            trees = []; for (let i = 0; i < TREE_COUNT; i++) { const foliageRadius = Math.random() * 15 + 10; const trunkHeight = foliageRadius * (Math.random() * 0.5 + 1.0); const trunkWidth = foliageRadius * 0.2; const yPos = GROUND_LEVEL_START_Y + Math.random() * 30 + 5; trees.push({ x: Math.random() * canvas.width, y: yPos, trunkWidth: trunkWidth, trunkHeight: trunkHeight, foliageRadius: foliageRadius, type: 'tree' }); } trees.sort((a, b) => a.y - b.y);
+        }
+
+
+        // --- Game Object Drawing ---
+        function drawUfo() { /* ... (no changes) ... */
+             if (gameOver || explosionEffect || gameWon) return; const ufoX = ufo.x + ufo.width / 2; const ufoY = ufo.y + ufo.height / 2; if (isCloaked) { ctx.globalAlpha = 0.4; } ctx.font = `${UFO_BASE_FONT_SIZE}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🛸', ufoX, ufoY); const alienSize = UFO_BASE_FONT_SIZE * 0.25; const alienYOffset = ufo.height * -0.3; const alienX = ufoX; const alienY = ufoY + alienYOffset; const alienRotation = -15 * Math.PI / 180; ctx.save(); ctx.translate(alienX, alienY); ctx.rotate(alienRotation); ctx.font = `${alienSize}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('👽', 0, 0); ctx.restore(); ctx.globalAlpha = 1.0;
+         }
+        function drawCow(cow) { /* ... (no changes) ... */
+            if(cow.dead) return; const scale = getScale(cow.y); const fontSize = COW_BASE_FONT_SIZE * scale;
+            ctx.font = `${fontSize}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText('🐄', cow.x + cow.width / 2, cow.y + cow.height / 2);
+        }
+        function drawFarmer(farmer) { /* ... (no changes) ... */
+            const scale = getScale(farmer.y);
+            const fontSize = FARMER_BASE_FONT_SIZE * scale;
+            const emoji = (farmer.gender === 'woman') ? '👩‍🌾' : '👨‍🌾';
+            ctx.font = `${fontSize}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(emoji, farmer.x + farmer.width / 2, farmer.y + farmer.height / 2);
+        }
+        function drawBullet(bullet) { /* ... (no changes) ... */
+            let emoji = '❓'; let fontSize = BULLET_BASE_FONT_SIZE; switch (bullet.weaponType) { case WEAPON.BAZOOKA: emoji = '🥕'; break; case WEAPON.MACHINE_GUN: emoji = '🎃'; break; case WEAPON.MISSILE: emoji = '🍆'; break; case WEAPON.NUKE: emoji = '💩'; fontSize = NUKE_BULLET_FONT_SIZE; break; } ctx.font = `${fontSize}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(emoji, bullet.x, bullet.y);
+        }
+        // REMOVED old drawHealthBar function
+
+        function drawZap() { /* ... (no changes) ... */
+             if (zapVisual && zapVisual.duration > 0) { ctx.beginPath(); ctx.moveTo(zapVisual.x1, zapVisual.y1); ctx.lineTo(zapVisual.x2, zapVisual.y2); ctx.strokeStyle = '#fef08a'; ctx.lineWidth = 3; ctx.shadowColor = '#facc15'; ctx.shadowBlur = 15; ctx.stroke(); ctx.shadowBlur = 0; zapVisual.duration--; } else { zapVisual = null; }
+        }
+        function drawExplosion() { /* ... (no changes) ... */
+            if (!explosionEffect) return; const { x, y, maxRadius, duration, currentFrame } = explosionEffect; const progress = currentFrame / duration; const numCircles = 5;
+            for (let i = 0; i < numCircles; i++) { const radius = maxRadius * progress * (1 - i * 0.15); if (radius < 0) continue; const opacity = (1 - progress) * (1 - i * 0.1); let color; if (i % 3 === 0) color = `rgba(255, 69, 0, ${opacity})`; else if (i % 3 === 1) color = `rgba(255, 215, 0, ${opacity})`; else color = `rgba(255, 0, 0, ${opacity})`; ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill(); }
+            explosionEffect.currentFrame++; if (explosionEffect.currentFrame >= duration) { explosionEffect = null; endGameContent.className = 'end-game-content game-over'; endGameTitle.className = 'end-game-title game-over'; endGameTitle.textContent = 'Game Over'; finalScoreDisplay.textContent = score; endGameOverlay.classList.remove('hidden'); }
+        }
+        function drawMothership() { /* ... (no changes) ... */
+             if (!mothership) return; ctx.font = `${MOTHERSHIP_BASE_FONT_SIZE}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🪐', mothership.x + mothership.width / 2, mothership.y + mothership.height / 2 + 5);
+         }
+        function drawBarn(barn) { /* ... (no changes) ... */
+            if (barn.isOpen) return; const scale = getScale(barn.y); const w = barn.width * scale; const h = barn.height * scale; const drawX = barn.x - (w - barn.width) / 2; const drawY = barn.y - (h - barn.height) / 2; const wallHeight = h * 0.6; const roofHeight = h * 0.4; ctx.fillStyle = '#8B4513'; ctx.fillRect(drawX, drawY + roofHeight, w, wallHeight); ctx.fillStyle = '#8B0000'; ctx.beginPath(); ctx.moveTo(drawX, drawY + roofHeight); ctx.lineTo(drawX + w / 2, drawY); ctx.lineTo(drawX + w, drawY + roofHeight); ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#5a2d0c'; ctx.lineWidth = 1 * scale > 1 ? scale : 1; ctx.strokeRect(drawX + w * 0.3, drawY + roofHeight + wallHeight * 0.2, w * 0.4, wallHeight * 0.8);
+        }
+        function drawStars() { /* ... (no changes) ... */
+            ctx.fillStyle = 'white'; stars.forEach(star => { ctx.beginPath(); ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2); ctx.fill(); });
+        }
+        function drawTrees() { /* ... (no changes) ... */
+            trees.forEach(tree => { const scale = getScale(tree.y); const trunkW = tree.trunkWidth * scale; const trunkH = tree.trunkHeight * scale; const foliageR = tree.foliageRadius * scale; const treeCenterX = tree.x; const trunkTopY = tree.y - trunkH; ctx.fillStyle = '#5a2d0c'; ctx.fillRect(treeCenterX - trunkW / 2, trunkTopY, trunkW, trunkH); ctx.fillStyle = '#006400'; ctx.beginPath(); ctx.arc(treeCenterX, trunkTopY, foliageR, 0, Math.PI * 2); ctx.fill(); });
+        }
+        /**
+         * NEW: Draws the game title screen with rainbow text.
+         */
+        function drawTitleScreen() {
+            // Title
+            ctx.font = TITLE_FONT;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // Create gradient for rainbow effect
+            const textWidth = ctx.measureText(GAME_TITLE).width;
+            const gradientStartX = canvas.width / 2 - textWidth / 2;
+            const gradientEndX = canvas.width / 2 + textWidth / 2;
+            const gradient = ctx.createLinearGradient(gradientStartX, 0, gradientEndX, 0);
+
+            // Add rainbow color stops
+            RAINBOW_COLORS.forEach((color, index) => {
+                gradient.addColorStop(index / (RAINBOW_COLORS.length - 1), color);
+            });
+
+            ctx.fillStyle = gradient;
+            ctx.fillText(GAME_TITLE, canvas.width / 2, canvas.height * 0.25);
+
+            // Subtitle / Prompt
+            ctx.fillStyle = UI_COLOR; // White for subtitle
+            ctx.font = SUBTITLE_FONT;
+             ctx.fillText("Click Start Button", canvas.width / 2, canvas.height * 0.35);
+             ctx.font = UI_FONT; // Reset font for other UI
+             ctx.fillText("Arrows=Move Space=Zap C=Cloak", canvas.width / 2, canvas.height * 0.42);
+
+        }
+
+        /**
+         * NEW: Draws all UI elements (Score, Health, Cloak) on canvas.
+         */
+        function drawUI() {
+            ctx.font = UI_FONT;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.shadowColor = UI_SHADOW_COLOR;
+            ctx.shadowBlur = 5;
+
+            // Score
+            ctx.fillStyle = UI_COLOR;
+            ctx.fillText(`Score: ${score}`, UI_PADDING, UI_PADDING);
+
+            // Health Bar (drawn on canvas)
+            const healthBarX = UI_PADDING;
+            const healthBarY = UI_PADDING + UI_LINE_HEIGHT;
+            const currentHealthWidth = Math.max(0, HEALTH_BAR_WIDTH * (health / 100));
+            let healthColor = '#ef4444'; // Red
+            if (health > 60) healthColor = '#84cc16'; // Green
+            else if (health > 30) healthColor = '#f59e0b'; // Yellow
+
+            // Background
+            ctx.fillStyle = '#555'; // Dark grey background
+            ctx.fillRect(healthBarX, healthBarY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
+            // Fill
+            ctx.fillStyle = healthColor;
+            ctx.fillRect(healthBarX, healthBarY, currentHealthWidth, HEALTH_BAR_HEIGHT);
+            // Border
+            ctx.strokeStyle = UI_COLOR; // White border
+            ctx.lineWidth = 2;
+            ctx.strokeRect(healthBarX, healthBarY, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
+
+            // Cloak Status
+            const cloakStatusY = healthBarY + HEALTH_BAR_HEIGHT + (UI_LINE_HEIGHT / 2);
+            let cloakStatusText = "Cloak: Charging...";
+            let cloakColor = "#f87171"; // Red (charging)
+            if (isCloaked) { cloakStatusText = "Cloak: ACTIVE"; cloakColor = "#fde047"; }
+            else if (cloakReady) { cloakStatusText = "Cloak: READY"; cloakColor = "#84cc16"; }
+            ctx.fillStyle = cloakColor;
+            ctx.fillText(cloakStatusText, UI_PADDING, cloakStatusY);
+
+            ctx.shadowBlur = 0; // Reset shadow
+        }
+
+
+        // --- Game Logic Functions ---
+        function updateUfo() { /* ... (no changes) ... */
+             try { if (keys['ArrowLeft'] && ufo.x > 0) ufo.x -= ufo.speed; if (keys['ArrowRight'] && ufo.x + ufo.width < canvas.width) ufo.x += ufo.speed; if (keys['ArrowUp'] && ufo.y > 0) ufo.y -= ufo.speed; if (keys['ArrowDown'] && ufo.y + ufo.height < canvas.height) ufo.y += ufo.speed; if (keys['KeyC'] && cloakReady && !isCloaked) { isCloaked = true; cloakReady = false; playSound('cloak_on'); clearTimeout(cloakDurationTimer); clearTimeout(cloakCooldownTimer); cloakDurationTimer = setTimeout(() => { isCloaked = false; }, CLOAK_DURATION); cloakCooldownTimer = setTimeout(() => { cloakReady = true; }, CLOAK_COOLDOWN); } if (keys['Space'] && zapReady && !isCloaked) { zapReady = false; playSound('zap'); let closestTarget = null; let minDistance = Infinity; let targetX, targetY; const potentialTargets = [...farmers,...cows, ...barns.filter(b => !b.isOpen)]; potentialTargets.forEach(target => { if (!target || typeof target.x === 'undefined') { return; } if (target.type === 'cow' && (target.abducted || target.dead)) return; const targetCenterX = target.x + target.width / 2; const targetCenterY = target.y + target.height / 2; const ufoCenterX = ufo.x + ufo.width / 2; const ufoCenterY = ufo.y + ufo.height / 2; const distance = Math.hypot(ufoCenterX - targetCenterX, ufoCenterY - targetCenterY); if (distance < minDistance) { minDistance = distance; closestTarget = target; targetX = targetCenterX; targetY = targetCenterY; } }); if (closestTarget && minDistance < 150) { zapVisual = { x1: ufo.x + ufo.width / 2, y1: ufo.y + ufo.height / 2, x2: targetX, y2: targetY, duration: 10 }; if (closestTarget.type === 'cow') { if (Math.random() < 0.8) { closestTarget.dead = true; score -= 5; playSound('cowDeath'); } } else if (closestTarget.type === 'farmer') { const farmerIndex = farmers.indexOf(closestTarget); if (farmerIndex > -1) { farmers.splice(farmerIndex, 1); score += 20; } } else if (closestTarget.type === 'barn') { closestTarget.isOpen = true; if (closestTarget.hiddenCow) { cows.push(closestTarget.hiddenCow); closestTarget.hiddenCow = null; } playSound('barnBreak'); } } else { zapVisual = null; } clearTimeout(zapTimeoutId); zapTimeoutId = setTimeout(() => { zapReady = true; }, 1000); } if (mothership && abductedCowCount >= initialCowCount && initialCowCount > 0) { const ufoRect = { x: ufo.x, y: ufo.y, width: ufo.width, height: ufo.height }; if (checkCollision(ufoRect, mothership)) { handleWin(); } } } catch (error) { console.error("Error during UFO update:", error); }
+        }
+        function updateCows() { /* ... (no changes) ... */
+            const now = Date.now(); cows.forEach(cow => { if (!cow.abducted && !cow.dead) { if (Math.random() < COW_CHANGE_DIR_PROB) { const angle = Math.random() * Math.PI * 2; const speed = COW_BASE_SPEED * gameSpeed; cow.vx = Math.cos(angle) * speed; cow.vy = Math.sin(angle) * speed; } cow.x += cow.vx * gameSpeed; cow.y += cow.vy * gameSpeed; let bounced = false; if (cow.x - cow.width / 2 < 0) { cow.x = cow.width / 2; cow.vx *= -1; bounced = true; } else if (cow.x + cow.width / 2 > canvas.width) { cow.x = canvas.width - cow.width / 2; cow.vx *= -1; bounced = true; } if (cow.y - cow.height / 2 < GROUND_LEVEL_START_Y) { cow.y = GROUND_LEVEL_START_Y + cow.height / 2; cow.vy *= -1; bounced = true; } else if (cow.y + cow.height / 2 > GROUND_LEVEL_END_Y) { cow.y = GROUND_LEVEL_END_Y - cow.height / 2; cow.vy *= -1; bounced = true; } if (bounced && Math.random() < 0.1) { const angle = Math.random() * Math.PI * 2; const speed = COW_BASE_SPEED * gameSpeed; cow.vx = Math.cos(angle) * speed; cow.vy = Math.sin(angle) * speed; } const timeSinceLastMoo = now - cow.lastMooTime; if (timeSinceLastMoo > COW_MOO_INTERVAL + Math.random() * COW_MOO_RANDOMNESS) { playSound('moo'); cow.lastMooTime = now; } const cowRect = getScaledRect(cow); const ufoInteractionRect = { x: ufo.x, y: ufo.y + ufo.height * 0.6, width: ufo.width, height: ufo.height * 0.4 }; if (checkCollision(ufoInteractionRect, cowRect)) { cow.abducted = true; abductedCowCount++; score += 10; playSound('abduct'); showMessage(`Cow Abducted! (${abductedCowCount}/${initialCowCount})`, 2000); } } }); cows = cows.filter(cow => !cow.abducted && !cow.dead);
+         }
+        function updateFarmers() { /* ... (no changes) ... */
+            const now = Date.now(); farmers.forEach(farmer => { const toUfoX = ufo.x + ufo.width / 2 - (farmer.x + farmer.width / 2); const farmerSpeedX = FARMER_BASE_SPEED_X * gameSpeed; const farmerSpeedY = 0.5 * gameSpeed; farmer.x += Math.sign(toUfoX) * farmerSpeedX; farmer.y += (Math.random() * 2 - 1) * farmerSpeedY; farmer.x = Math.max(0 + farmer.width / 2, Math.min(canvas.width - farmer.width / 2, farmer.x)); farmer.y = Math.max(GROUND_LEVEL_START_Y + farmer.height / 2, Math.min(GROUND_LEVEL_END_Y - farmer.height / 2, farmer.y)); if (!isCloaked) { const toUfoY = ufo.y + ufo.height / 2 - (farmer.y + farmer.height / 2); const targetAngle = Math.atan2(toUfoY, toUfoX); const aimingSpeed = 0.05 * gameSpeed; farmer.aim = approachAngle(farmer.aim, targetAngle, aimingSpeed); } if (!isCloaked) { const bulletStartX = farmer.x + farmer.width / 2; const bulletStartY = farmer.y + farmer.height / 2; let shootProbability = 0; let weaponSound = null; switch (farmer.weaponType) { case WEAPON.BAZOOKA: shootProbability = 0.01 * gameSpeed; weaponSound = 'shoot_bazooka'; if (Math.random() < shootProbability) { bullets.push(createBullet(bulletStartX, bulletStartY, farmer.aim, farmer.weaponType)); playSound(weaponSound); } break; case WEAPON.MACHINE_GUN: shootProbability = 0.15 * gameSpeed; weaponSound = 'shoot_machine_gun'; if (Math.random() < shootProbability) { bullets.push(createBullet(bulletStartX, bulletStartY, farmer.aim, farmer.weaponType)); playSound(weaponSound); } break; case WEAPON.MISSILE: shootProbability = 0.02 * gameSpeed; weaponSound = 'shoot_missile'; if (Math.random() < shootProbability) { bullets.push(createBullet(bulletStartX, bulletStartY, farmer.aim, farmer.weaponType)); playSound(weaponSound); } break; case WEAPON.NUKE: shootProbability = 0.001 * gameSpeed; weaponSound = 'shoot_nuke'; if (now - farmer.lastNukeTime > NUKE_COOLDOWN) { if (Math.random() < shootProbability) { playSound(weaponSound); bullets.push(createBullet(bulletStartX, bulletStartY, farmer.aim, farmer.weaponType)); farmer.lastNukeTime = now; } } break; } } });
+         }
+        function updateBullets() { /* ... (no changes) ... */
+             bullets.forEach(bullet => { if (bullet.isHoming && ufo && !isCloaked) { const targetAngle = Math.atan2(ufo.y + ufo.height/2 - bullet.y, ufo.x + ufo.width/2 - bullet.x); bullet.angle = approachAngle(bullet.angle, targetAngle, NUKE_HOMING_RATE); } bullet.x += Math.cos(bullet.angle) * bullet.speed * gameSpeed; bullet.y += Math.sin(bullet.angle) * bullet.speed * gameSpeed; }); bullets = bullets.filter(bullet => bullet.x > -(bullet.radius || 4) && bullet.x < canvas.width + (bullet.radius || 4) && bullet.y > -(bullet.radius || 4) && bullet.y < canvas.height + (bullet.radius || 4) );
+         }
+        function checkBulletCollisions() { /* ... (no changes) ... */
+             for (let i = bullets.length - 1; i >= 0; i--) { const bullet = bullets[i]; const bulletRadius = bullet.radius || 4; const bulletRect = { x: bullet.x - bulletRadius, y: bullet.y - bulletRadius, width: bulletRadius * 2, height: bulletRadius * 2 }; const ufoRect = { x: ufo.x, y: ufo.y, width: ufo.width, height: ufo.height }; if (bullet.isFarmer && !isCloaked && checkCollision(ufoRect, bulletRect)) { const damage = bullet.damage || BAZOOKA_DAMAGE; const isNuke = bullet.weaponType === WEAPON.NUKE; bullets.splice(i, 1); if (!gameOver && !gameWon) { health -= damage; playSound(isNuke ? 'nuke_impact' : 'hit'); if (health <= 0) { health = 0; handleGameOver(); } } break; } }
+         }
+
+
+        // --- Input Handling ---
+        document.addEventListener('keydown', (e) => { keys[e.code] = true; });
+        document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+        // --- Game Initialization and Control ---
+        function initGame() { /* ... (Calls initTrees) ... */
+            ufo = createUfo(); mothership = createMothership(); barns = []; cows = []; farmers = []; bullets = []; score = 0; health = 100; gameOver = false; gameWon = false; explosionEffect = null; abductedCowCount = 0; initialCowCount = 0; totalFarmersSpawned = 0; gameRunning = true; endGameOverlay.classList.add('hidden'); keys = {}; zapReady = true; zapVisual = null; isCloaked = false; cloakReady = true; clearTimeout(cloakDurationTimer); cloakDurationTimer = null; clearTimeout(cloakCooldownTimer); cloakCooldownTimer = null; clearTimeout(zapTimeoutId); clearInterval(farmerIntervalId); clearTimeout(messageTimeoutId); messageTimeoutId = null; initStars(); initTrees(); barns = []; for (let i = 0; i < INITIAL_BARN_COUNT; i++) { const x = Math.random() * (canvas.width - BARN_WIDTH) + BARN_WIDTH / 2; const y = GROUND_LEVEL_START_Y + Math.random() * (GROUND_RANGE * 0.9); barns.push(createBarn(x, y)); } initialCowCount = barns.length; farmers = []; for (let i = 0; i < INITIAL_FARMER_COUNT; i++) { const x = Math.random() * (canvas.width - 50) + 25; const y = GROUND_LEVEL_START_Y + Math.random() * (GROUND_RANGE * 0.9); farmers.push(createFarmer(x, y)); } farmerIntervalId = setInterval(() => { if (gameRunning && !gameOver && !gameWon && farmers.length < 5 + difficultyLevel * 2) { const x = Math.random() * canvas.width; const y = GROUND_LEVEL_START_Y + Math.random() * GROUND_RANGE * 0.8; farmers.push(createFarmer(x, y)); } }, 3000 / difficultyLevel); pauseButton.classList.remove('hidden'); pauseButton.textContent = 'Pause'; startButton.classList.add('hidden'); messageElement.classList.add('hidden'); if (animationId) cancelAnimationFrame(animationId); gameLoop();
+        }
+
+        function pauseGame() { /* ... (no changes) ... */
+             if (gameOver || gameWon) return; gameRunning = false; pauseButton.textContent = 'Continue'; clearInterval(farmerIntervalId); clearTimeout(zapTimeoutId); clearTimeout(messageTimeoutId); messageTimeoutId = null; clearTimeout(cloakDurationTimer); cloakDurationTimer = null; clearTimeout(cloakCooldownTimer); cloakCooldownTimer = null; if (animationId) cancelAnimationFrame(animationId);
+        }
+        function continueGame() { /* ... (no changes) ... */
+             if (gameOver || gameWon) return; gameRunning = true; pauseButton.textContent = 'Pause'; farmerIntervalId = setInterval(() => { if (gameRunning && !gameOver && !gameWon && farmers.length < 5 + difficultyLevel * 2) { const x = Math.random() * canvas.width; const y = GROUND_LEVEL_START_Y + Math.random() * GROUND_RANGE * 0.8; farmers.push(createFarmer(x, y)); } }, 3000 / difficultyLevel); if (!zapReady && zapTimeoutId) { clearTimeout(zapTimeoutId); zapTimeoutId = setTimeout(() => { zapReady = true; }, 1000); } isCloaked = false; cloakReady = true; clearTimeout(cloakDurationTimer); cloakDurationTimer = null; clearTimeout(cloakCooldownTimer); cloakCooldownTimer = null; if (animationId) cancelAnimationFrame(animationId); gameLoop();
+        }
+        function toggleMute() { /* ... (no changes) ... */
+             isMuted = !isMuted; muteIcon.textContent = isMuted ? '🔇' : '🔊';
+        }
+        function handleGameOver() { /* ... (no changes) ... */
+            if (gameOver || gameWon) return; gameOver = true; gameRunning = false; explosionEffect = { x: ufo.x + ufo.width / 2, y: ufo.y + ufo.height / 2, currentRadius: 5, maxRadius: ufo.width * 1.2, duration: EXPLOSION_DURATION, currentFrame: 0 }; playSound('gameOver'); clearInterval(farmerIntervalId); clearTimeout(zapTimeoutId); if (messageTimeoutId) { clearTimeout(messageTimeoutId); messageTimeoutId = null; } clearTimeout(cloakDurationTimer); cloakDurationTimer = null; clearTimeout(cloakCooldownTimer); cloakCooldownTimer = null;
+        }
+        function handleWin() { /* ... (no changes) ... */
+            if (gameOver || gameWon) return; gameWon = true; gameRunning = false; playSound('win'); clearInterval(farmerIntervalId); clearTimeout(zapTimeoutId); if (messageTimeoutId) { clearTimeout(messageTimeoutId); messageTimeoutId = null; } clearTimeout(cloakDurationTimer); cloakDurationTimer = null; clearTimeout(cloakCooldownTimer); cloakCooldownTimer = null; const finalScore = score * WIN_SCORE_MULTIPLIER; endGameContent.className = 'end-game-content win'; endGameTitle.className = 'end-game-title win'; endGameTitle.textContent = `You Win! (Score x${WIN_SCORE_MULTIPLIER})`; finalScoreDisplay.textContent = finalScore; endGameOverlay.classList.remove('hidden'); if (animationId) cancelAnimationFrame(animationId);
+        }
+        function restartGame() { /* ... (no changes) ... */
+             initGame();
+        }
+
+        // --- Animation Loop ---
+        function gameLoop() {
+            if (gameWon || (gameOver && !explosionEffect)) { return; }
+
+            try {
+                // --- Updates ---
+                if (gameRunning) {
+                    updateUfo();
+                    // Check flags again in case updateUfo triggered win/loss
+                    if (!gameRunning || gameOver || gameWon) {}
+                    else { updateCows(); updateFarmers(); updateBullets(); checkBulletCollisions(); }
+                }
+
+                // --- Drawing ---
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Background elements
+                drawStars();
+                drawTrees();
+                drawMothership();
+
+                // Title Screen (only if game hasn't started)
+                if (!gameRunning && !gameOver && !gameWon) {
+                    drawTitleScreen();
+                } else {
+                    // Active Gameplay / Game Over Explosion Drawing
+                    gameObjects = [...barns.filter(b => !b.isOpen), ...cows, ...farmers, ...bullets ];
+                    gameObjects.sort((a, b) => a.y - b.y);
+                    gameObjects.forEach(obj => { if (!obj) return; switch(obj.type) { case 'barn': drawBarn(obj); break; case 'cow': drawCow(obj); break; case 'farmer': drawFarmer(obj); break; case 'bullet': drawBullet(obj); break; } });
+
+                    drawUfo();
+                    drawExplosion(); // Draw explosion if game is over
+                    drawZap();
+                }
+
+                // Draw UI on top (if not on title screen)
+                if (gameRunning || gameOver || gameWon) {
+                    drawUI(); // NEW function to draw score, health, cloak status
+                }
+
+                // Request the next frame
+                animationId = requestAnimationFrame(gameLoop);
+
+            } catch (error) {
+                console.error("Error in game loop:", error);
+                gameRunning = false; gameOver = true; if (animationId) cancelAnimationFrame(animationId);
+                showMessage("A critical error occurred! Please check console.", 10000);
+                endGameContent.className = 'end-game-content game-over'; endGameTitle.className = 'end-game-title game-over'; endGameTitle.textContent = 'Error!'; finalScoreDisplay.textContent = score; endGameOverlay.classList.remove('hidden');
+            }
+        }
+
+        // --- Event Listeners ---
+        startButton.addEventListener('click', initGame);
+        pauseButton.addEventListener('click', () => { if (gameRunning) { pauseGame(); } else { continueGame(); } });
+        muteButton.addEventListener('click', toggleMute);
+        restartButton.addEventListener('click', restartGame);
+
+        // --- Initial Setup ---
+        // Draw initial state (title screen) once before starting loop
+        // This requires drawing background elements outside the loop initially,
+        // or letting the first frame of the loop handle it.
+        // Let's let the first frame handle it for simplicity.
+        showMessage("Use Arrow Keys to Move, Space to Zap! Press C to Cloak!", 6000);
+        initStars(); // Init stars once
+        initTrees(); // Init trees once
+        mothership = createMothership(); // Create mothership once
+        // Trigger the first frame render manually if needed, or rely on Start button.
+        // Let's draw a static initial frame before game starts
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawStars();
+        drawTrees();
+        drawMothership();
+        drawTitleScreen();
+
+
+    </script>
+</body>
+</html>
